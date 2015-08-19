@@ -9,7 +9,7 @@ function Invoke-NetRipper {
     Lync (Skype for Business), Microsoft Outlook, Google Chrome, Mozilla Firefox
     
     NetRipper was written by Ionut Popescu (see links).
-    PowerShell port by @harmj0y
+    PowerShell port by @harmj0y and based on PowerSploit code by @mattifestation
 
     .PARAMETER ProcessID
     Specific process ID to inject the NetRipper dll into.
@@ -43,6 +43,7 @@ function Invoke-NetRipper {
 
     .LINK
     https://github.com/NytroRST/NetRipper/
+    https://github.com/mattifestation/PowerSploit/blob/master/CodeExecution/Invoke--Shellcode.ps1
     #>
 
     [CmdletBinding()]
