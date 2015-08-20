@@ -2,7 +2,7 @@
 #   Most of these came from development of the Empire agent
 
 function Get-Route {
-	$adapters = @{}
+    $adapters = @{}
     Get-WmiObject Win32_NetworkAdapterConfiguration | %{ $adapters[[int]($_.InterfaceIndex)] = $_.IPAddress }
     Get-WmiObject win32_IP4RouteTable | %{
         $out = New-Object psobject
