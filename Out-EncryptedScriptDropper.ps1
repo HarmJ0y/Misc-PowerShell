@@ -29,7 +29,7 @@ function Out-EncryptedScriptDropper {
     $r=1..16|ForEach-Object{Get-Random -max 61};
     $XORKey=('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789'[$r] -join '');
 
-    $code = (Get-Content -Encoding Ascii -Path $ScriptPath)
+    $code = (Get-Content -Encoding Ascii -Path $ScriptPath | Out-String)
     $code = $code.trim()
 
     # XOR the code with the specified $XORKey
