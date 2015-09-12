@@ -12,6 +12,9 @@ and a golden ticket is constructed/injected using sid-histories that gives eleva
 
 SID histories in golden tickets are detailed by Sean Metcalf (@PyroTek3) at https://adsecurity.org/?p=1640
 
+WARNING: this is a proof of concept. I highly recommend you perform these actions manually.
+You have been warned ;)
+
 Function: Invoke-RaiseChild
 Author: @harmj0y
 Invoke-Mimikatz author: Joe Bialek, Twitter: @JosephBialek
