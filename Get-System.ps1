@@ -63,7 +63,9 @@ function Get-System {
         Reverts the current thread privileges.
 
     .LINK
-
+    
+        https://github.com/rapid7/meterpreter/blob/2a891a79001fc43cb25475cc43bced9449e7dc37/source/extensions/priv/server/elevate/namedpipe.c
+        https://github.com/obscuresec/shmoocon/blob/master/Invoke-TwitterBot
         http://blog.cobaltstrike.com/2014/04/02/what-happens-when-i-type-getsystem/
         http://clymb3r.wordpress.com/2013/11/03/powershell-and-token-impersonation/
 #>
