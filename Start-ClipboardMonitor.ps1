@@ -69,8 +69,7 @@ function Start-ClipboardMonitor {
                 # YES I know there might be edge cases :)
                 if($PrevFirstChar -ne ($tb.Text)[0]){
                     $TimeStamp = (Get-Date -Format dd/MM/yyyy:HH:mm:ss:ff)
-                    "`n=== $TimeStamp ===`n"
-                    $tb.Text
+                    "`n=== $TimeStamp ===`n" + $tb.Text
                     $PrevFirstChar = ($tb.Text)[0]
                     $PrevLength = $tb.Text.Length 
                 }
